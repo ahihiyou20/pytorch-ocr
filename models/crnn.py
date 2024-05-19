@@ -37,15 +37,25 @@ class CRNN(nn.Module):
 
         # feature extraction
         self.convnet = resnet18(weights=ResNet18_Weights.DEFAULT)
+        for param in self.convnet.parameters():  # Freeze earlier layers of ResNet
+            param.requires_grad = False
+
         if grayscale:
             self.convnet.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
 
+        # Custom convolutional layers with dilated convolutions (example)
+        self.convnet2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.dilated_conv2 = nn.Conv2d(128, 256, kernel_size=3, padding=1, dilation=2)
+        self.convnet3 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        
+        
         linear_input_size = self._calc_linear_layer()
         self.linear = nn.Linear(linear_input_size, dims)
         self.drop = nn.Dropout(0.5)
 
         # sequence modeling
-        self.lstm = nn.GRU(dims, dims // 2, bidirectional=True, num_layers=1, batch_first=True)
+        self.lstm = nn.GRU(dims, dims // 2, bidirectional=True, num_layers=2, batch_first=True)
         # self.self_attn = SelfAttention(dims, dims)
         # output
         if use_attention:
@@ -64,6 +74,11 @@ class CRNN(nn.Module):
         x = self.convnet.relu(x)
         x = self.convnet.maxpool(x)
         x = self.convnet.layer1(x)
+
+        x = self.relu(self.convnet2(x))
+        x = self.relu(self.dilated_conv2(x))
+        x = self.relu(self.convnet3(x))
+        
         x = x.permute(0, 3, 1, 2)
         conv_output = x.view(x.size(0), x.size(1), -1)  # torch.Size([bs, 45, 832])
         return conv_output.shape[-1]
@@ -75,6 +90,10 @@ class CRNN(nn.Module):
         x = self.convnet.relu(x)
         x = self.convnet.maxpool(x)
         x = self.convnet.layer1(x)  # torch.size([bs,64,13,45])
+
+        x = self.relu(self.convnet2(x))
+        x = self.relu(self.dilated_conv2(x))
+        x = self.relu(self.convnet3(x))
 
         # Permute to stack dimensions and flatten into 2d
         x = x.permute(0, 3, 1, 2)
